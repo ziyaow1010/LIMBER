@@ -77,6 +77,75 @@ def build_shm_cache(gz_path, shm_path, val_path, val_mod=2048, min_len=1, log=pr
     return n_train
 
 
+def epoch_cache_fingerprint(epoch_dir, meta):
+    """Fingerprint tying a /dev/shm cache to *this* epoch_dir + n_train/n_val --
+    a stale cache from a different run (e.g. left over on a recycled node)
+    must never be silently reused."""
+    return f"{Path(epoch_dir).resolve()}|{meta['n_train']}|{meta['n_val']}|{meta['epochs']}"
+
+
+def epoch_cache_is_fresh(epoch_dir, shm_dir, meta, fingerprint=None):
+    """Read-only freshness check, safe to call from every rank concurrently
+    (no file mutation) -- used to gate which rank performs the rebuild."""
+    shm_dir = Path(shm_dir)
+    fingerprint = fingerprint or epoch_cache_fingerprint(epoch_dir, meta)
+    marker = shm_dir / "rna_seqs_per_epoch.done"
+    epoch_paths = [shm_dir / f"rna_seqs_epoch{e + 1}.txt" for e in range(meta["epochs"])]
+    val_shm = shm_dir / "rna_seqs_val.txt"
+    return (marker.exists() and marker.read_text() == fingerprint
+            and all(p.exists() for p in epoch_paths) and val_shm.exists())
+
+
+def build_shm_cache_per_epoch(epoch_dir, shm_dir, log=print):
+    """Copy pre-sampled per-epoch cluster files (scripts/sample_cluster_epochs.py
+    output: epoch_dir/{epoch1..N,val}.txt + meta.json) into /dev/shm so training
+    reads from tmpfs. Idempotent: skips if shm marker is already complete and
+    fresh. NOT safe to call concurrently from multiple ranks when the cache is
+    stale/missing -- callers must gate the rebuild to a single rank (see
+    epoch_cache_is_fresh) and have other ranks just wait, since the purge+copy
+    below is not atomic across processes.
+    Returns (n_train, val_shm_path, [epoch_shm_path, ...])."""
+    import json
+    import shutil
+
+    epoch_dir, shm_dir = Path(epoch_dir), Path(shm_dir)
+    meta = json.load(open(epoch_dir / "meta.json"))
+    n_epochs = meta["epochs"]
+    fingerprint = epoch_cache_fingerprint(epoch_dir, meta)
+    marker = shm_dir / "rna_seqs_per_epoch.done"
+    epoch_paths = [shm_dir / f"rna_seqs_epoch{e + 1}.txt" for e in range(n_epochs)]
+    val_shm = shm_dir / "rna_seqs_val.txt"
+    if epoch_cache_is_fresh(epoch_dir, shm_dir, meta, fingerprint):
+        log(f"[cache] reuse per-epoch shm cache ({meta['n_train']:,} train seqs/epoch)")
+        return meta["n_train"], val_shm, epoch_paths
+    if marker.exists():
+        log("[cache] stale /dev/shm cache from a different run found -- purging")
+        for p in epoch_paths + [val_shm, marker]:
+            p.unlink(missing_ok=True)
+        for p in shm_dir.glob("rna_seqs_epoch*.txt"):
+            p.unlink(missing_ok=True)
+
+    shm_dir.mkdir(parents=True, exist_ok=True)
+    t0 = time.time()
+    # epoch{N}.txt may be symlinks to the same underlying file (e.g. full-data
+    # mode with no per-epoch resampling) -- copy each *distinct* source once
+    # and symlink the rest, so identical epochs don't multiply RAM usage.
+    copied = {}
+    for e, dst in enumerate(epoch_paths):
+        src = (epoch_dir / f"epoch{e + 1}.txt").resolve()
+        if src in copied:
+            dst.unlink(missing_ok=True)
+            dst.symlink_to(copied[src])
+        else:
+            shutil.copy2(src, dst)
+            copied[src] = dst
+    shutil.copy2(epoch_dir / "val.txt", val_shm)
+    marker.write_text(fingerprint)
+    log(f"[cache] copied {n_epochs} per-epoch files "
+        f"({meta['n_train']:,} train seqs/epoch) in {time.time() - t0:.0f}s -> {shm_dir}")
+    return meta["n_train"], val_shm, epoch_paths
+
+
 def encode(seq, max_len, rng):
     """Random-crop (if needed) + add CLS/SEP. Returns (ids, special_mask)."""
     L = len(seq)
@@ -93,11 +162,19 @@ class RNAStreamDataset(IterableDataset):
     (rank x dataloader-worker), shuffle-buffered, with per-epoch random crops."""
 
     def __init__(self, shm_path, max_len=1022, shuffle_buffer=50000, seed=42,
-                 group_size=0):
-        self.shm_path = str(shm_path)
+                 group_size=0, start_epoch=0):
+        """shm_path: a single file (reused every epoch) or a list of files,
+        one per epoch, cycled by epoch index (RiNALMo-style dynamic per-epoch
+        cluster resampling -- see sample_cluster_epochs.py).
+        start_epoch: initial epoch offset, so a resumed run (continuing past
+        N already-trained epochs) picks up at shm_paths[N] instead of
+        replaying file 0 -- each process's internal epoch counter otherwise
+        always starts at 0, independent of the Trainer's global_step."""
+        self.shm_paths = [str(shm_path)] if isinstance(shm_path, (str, Path)) else [str(p) for p in shm_path]
         self.max_len = max_len
         self.shuffle_buffer = shuffle_buffer
         self.seed = seed
+        self.start_epoch = start_epoch
         # group_size>0 -> length-grouped batching: buffer is sorted by post-crop
         # length and emitted in homogeneous chunks of group_size (shuffled order),
         # so the DataLoader's batches contain similar-length seqs => minimal
@@ -125,11 +202,12 @@ class RNAStreamDataset(IterableDataset):
 
     def __iter__(self):
         shard_id, n_shards = self._shard()
-        epoch = 0
+        epoch = self.start_epoch
         while True:                                   # infinite: one pass = one epoch
             rng = random.Random((self.seed * 1_000_003) ^ (epoch * 9973) ^ (shard_id * 131))
             buf = []
-            with open(self.shm_path) as fh:
+            shm_path = self.shm_paths[epoch % len(self.shm_paths)]
+            with open(shm_path) as fh:
                 for idx, line in enumerate(fh):
                     if idx % n_shards != shard_id:
                         continue

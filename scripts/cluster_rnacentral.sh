@@ -1,25 +1,28 @@
 #!/bin/bash
-# Cluster RNAcentral to ~17M representative sequences (matching RiNALMo pretraining).
-# Uses mmseqs2 easy-cluster; installs it via conda if not found.
+# Cluster RNAcentral to ~17M representative sequences, matching RiNALMo's exact
+# preprocessing: (1) exact-dedup raw RNAcentral to unique sequences (paper: 40.7M -> 36M),
+# (2) mmseqs easy-linclust --min-seq-id 0.7 -c 0.8 on the deduped set (paper: 36M -> 17M).
 # Input:  /beacon-projects/rnallm/data/rnacentral/rnacentral_active.fasta.gz
 # Output: /beacon-projects/rnallm/data/rnacentral/clustered_17m.fasta
 #SBATCH --job-name=cluster_rna
 #SBATCH --partition=beacon
 #SBATCH --account=angliece
 #SBATCH --qos=high
-#SBATCH --cpus-per-task=32
-#SBATCH --mem=128G
+#SBATCH --cpus-per-task=4
+#SBATCH --mem=512G
 #SBATCH --time=12:00:00
 #SBATCH --output=/beacon-homes/ziyaow/RNA_FM/logs/cluster_rnacentral_%j.out
 #SBATCH --error=/beacon-homes/ziyaow/RNA_FM/logs/cluster_rnacentral_%j.err
 
 set -euo pipefail
+REPO=/beacon-homes/ziyaow/RNA_FM
 CONDA_BASE=/beacon-projects/rnallm/software/miniconda3
 DATA=/beacon-projects/rnallm/data/rnacentral
 INPUT=$DATA/rnacentral_active.fasta.gz
 OUT_FASTA=$DATA/clustered_17m.fasta
 TMP=$DATA/mmseqs_tmp
 CLUST_PREFIX=$DATA/mmseqs_clust
+DEDUP_FASTA=$DATA/rnacentral_active.dedup.fasta
 
 source $CONDA_BASE/etc/profile.d/conda.sh
 conda activate rnafm
@@ -47,18 +50,23 @@ fi
 
 echo "[cluster] Input sequences: $(grep -c '^>' $PLAIN_FASTA)"
 
+# Step 1: exact-dedup (RiNALMo dedupes RNAcentral to ~36M unique seqs before clustering)
+if [ ! -f "$DEDUP_FASTA" ]; then
+    echo "[cluster] Deduplicating to unique sequences..."
+    python "$REPO/scripts/dedup_fasta.py" "$PLAIN_FASTA" "$DEDUP_FASTA"
+fi
+echo "[cluster] Deduped sequences: $(grep -c '^>' $DEDUP_FASTA)"
+
 mkdir -p "$TMP"
-echo "[cluster] Running mmseqs easy-linclust (seq-id 0.8)..."
-# Use linclust (faster O(N) algorithm) targeting ~17M reps from 40.7M
-# --min-seq-id 0.8 is a common threshold that reduces ~40% redundancy
+echo "[cluster] Running mmseqs easy-linclust (--min-seq-id 0.7, RiNALMo paper setting)..."
 mmseqs easy-linclust \
-    "$PLAIN_FASTA" \
+    "$DEDUP_FASTA" \
     "$CLUST_PREFIX" \
     "$TMP" \
-    --min-seq-id 0.8 \
+    --min-seq-id 0.7 \
     --cov-mode 1 \
     -c 0.8 \
-    --threads 32 \
+    --threads 4 \
     -v 1
 
 REP_FASTA="${CLUST_PREFIX}_rep_seq.fasta"
@@ -67,5 +75,4 @@ echo "[cluster] Representatives: $N_REPS"
 cp "$REP_FASTA" "$OUT_FASTA"
 
 echo "[cluster] Done: $OUT_FASTA  ($N_REPS sequences)"
-echo "[cluster] If count >> 17M, re-run with higher --min-seq-id (e.g. 0.9)"
-echo "[cluster] If count << 17M, re-run with lower  --min-seq-id (e.g. 0.7)"
+echo "[cluster] RiNALMo paper: 40.7M raw -> 36M unique -> 17M clustered reps"

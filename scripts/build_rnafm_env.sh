@@ -47,7 +47,7 @@ $PIP install \
     --quiet
 
 echo "[env] Installing other dependencies..."
-$PIP install matplotlib tqdm pandas numpy scipy --quiet
+$PIP install matplotlib tqdm pandas numpy scipy einops ninja --quiet
 
 echo "[env] Installing mmseqs2 via conda (for clustering step)..."
 $CONDA_BIN install -y -n rnafm -c bioconda mmseqs2 --quiet 2>/dev/null || \

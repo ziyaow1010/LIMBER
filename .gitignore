@@ -45,3 +45,20 @@ outputs/contact_eval/smoke/
 outputs/fm_hybrid_650m/checkpoint-*/
 outputs/fm_hybrid_650m/ss_ft_ep1_model/
 outputs/fm_hybrid_650m/val_seqs.txt
+
+# ---- added 2026-10: results, logs and vendored third-party code ----
+# run outputs and logs (regenerable; live on /beacon-projects/rnallm)
+logs/
+outputs/
+# benchmark data pulled from upstream releases
+data/robin/
+data/nrc/
+data/ss_bench/
+new_inf/*.cvs
+new_inf/__pycache__/
+# vendored Zfold / trRosettaRNA source (from the structRFM repo, kept out of this tree)
+rna3d/Zfold/
+rna3d/_stage*/
+rna3d/*.csv
+_stage_ssbench/
+_ssbench_out/

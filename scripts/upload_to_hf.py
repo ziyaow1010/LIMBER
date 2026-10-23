@@ -30,6 +30,23 @@ MODELS = {
     # Hybrid-650M, epoch-1 checkpoint (RiNALMo-Giga-aligned run; pretraining to be
     # finished on H200 — see HANDOFF.md). Clean LM weights, no optimizer state.
     "kmer1-Hybrid-650M-ep1": "outputs/fm_hybrid_650m/ss_ft_ep1_model",
+    # Hybrid-10M, epoch-6 checkpoint. 12-layer TTM×4, hidden=256.
+    "kmer1-Hybrid-10M":      "outputs/hybrid_10m/epoch_checkpoints/epoch6",
+    # Hybrid-100M, epoch-12 checkpoint. 18-layer TTM×6, hidden=640.
+    "kmer1-Hybrid-100M-ep12": "outputs/fm_hybrid_100m/epoch_checkpoints/epoch12",
+    # Hybrid-300M, epoch-12 checkpoint. 15-layer TTM×5, hidden=1280.
+    "kmer1-Hybrid-300M-ep12": "outputs/fm_hybrid_300m/epoch_checkpoints/epoch12",
+    # Pure-Mamba-100M, epoch-6 checkpoint. 18 all-M layers, hidden=640.
+    "kmer1-PureMamba-100M":   "outputs/fm_pure_mamba_100m/epoch_checkpoints/epoch6",
+    # Pure-Mamba-300M, epoch-6 checkpoint. 15 all-M layers, hidden=1280.
+    "kmer1-PureMamba-300M":   "outputs/fm_pure_mamba_300m/epoch_checkpoints/epoch6",
+    # Pure-Transformer-650M, final 6-epoch weights. 33 all-T layers, hidden=1280.
+    "bert_650m_epoch6": "outputs/fm_pure_transformer_650m",
+    # Hybrid-100M with Mamba local-conv width 2 (d_conv=2 ablation vs the default 4).
+    # Final end-of-6-epoch weights. 18-layer TTM x6, hidden=640.
+    "hybrid_100m_dconv2_epoch6": "outputs/fm_hybrid_100m_dconv2",
+    # Pure-Mamba-650M, final 6-epoch weights. 33 all-M layers, hidden=1280.
+    "PureMamba-650M": "outputs/fm_pure_mamba_650m",
 }
 # only top-level final-model files (bare names -> won't match checkpoint-*/ subdirs)
 ALLOW = ["config.json", "model.safetensors", "pytorch_model.bin",

@@ -164,3 +164,87 @@ def ss_f1(target, pred, flexible=True):
     p = ss_precision(target, pred, flexible)
     r = ss_recall(target, pred, flexible)
     return 0.0 if p + r < 1e-5 else 2 * p * r / (p + r)
+
+
+# ---- Standard SS benchmark parsers (bit-faithful to RiNALMo's rinalmo/utils/sec_struct.py) ----
+# .ct  : ArchiveII fam-fold splits
+# .st  : SPOT-RNA bpRNA dataset (TR0 / VL0 / TS0)
+# .bpseq: Rivas TrainSetA / TestSetA / TestSetB
+
+_CLOSE_TO_OPEN = {")": "(", "]": "[", "}": "{", ">": "<"}
+
+
+def normalize_seq(seq):
+    """Pretraining preprocessing: uppercase, T->U, non-ACGU -> N."""
+    seq = seq.upper().replace("T", "U")
+    return "".join(c if c in "ACGU" else "N" for c in seq)
+
+
+def _payload_lines(path):
+    return [l for l in open(path) if not l.lstrip().startswith("#")]
+
+
+def dot_bracket_to_mat(db):
+    n = len(db)
+    m = np.zeros((n, n), dtype=np.float32)
+    stacks = {c: [] for c in "([{<"}
+    for i, c in enumerate(db):
+        if c in stacks:
+            stacks[c].append(i)
+        elif c in _CLOSE_TO_OPEN:
+            m[i, stacks[_CLOSE_TO_OPEN[c]].pop()] = 1.0
+        elif c != ".":
+            raise ValueError(f"unexpected dot-bracket symbol {c!r} at {i} in {path_hint(db)}")
+    return np.minimum(m + m.T, 1.0)
+
+
+def path_hint(db):
+    return f"<dbn len {len(db)}>"
+
+
+def parse_st(path):
+    """bpRNA .st: after dropping '#' comments, line 0 = sequence, line 1 = dot-bracket."""
+    lines = _payload_lines(path)
+    seq, dbn = lines[0].rstrip(), lines[1].rstrip()
+    if len(seq) != len(dbn):
+        raise ValueError(f"{path}: seq len {len(seq)} != dbn len {len(dbn)}")
+    return normalize_seq(seq), dot_bracket_to_mat(dbn)
+
+
+def parse_bpseq(path):
+    """Rivas .bpseq: '<idx> <nt> <pair_idx>' per line, 1-indexed, pair_idx 0 = unpaired."""
+    lines = [l for l in _payload_lines(path) if l.strip()]
+    n = len(lines)
+    seq, m = [], np.zeros((n, n), dtype=np.float32)
+    for line in lines:
+        i, nt, j = line.split()[:3]
+        seq.append(nt)
+        i, j = int(i), int(j)
+        if j:
+            m[i - 1, j - 1] = 1.0
+    return normalize_seq("".join(seq)), np.minimum(m + m.T, 1.0)
+
+
+_SS_PARSERS = {".ct": None, ".st": parse_st, ".bpseq": parse_bpseq}
+
+
+def load_ss_dir(data_dir, max_len, ct_parser):
+    """Load every .ct/.st/.bpseq under data_dir. Returns (items, n_skipped_too_long)."""
+    _SS_PARSERS[".ct"] = ct_parser
+    items, skipped, bad = [], 0, 0
+    for path in sorted(Path(data_dir).rglob("*")):
+        fn = _SS_PARSERS.get(path.suffix)
+        if fn is None and path.suffix != ".ct":
+            continue
+        try:
+            seq, pair = fn(path)
+        except Exception:
+            bad += 1
+            continue
+        if 0 < len(seq) <= max_len:
+            items.append({"id": path.stem, "seq": seq, "pair": pair})
+        else:
+            skipped += 1
+    if bad:
+        print(f"  [warn] {bad} unparsable files in {data_dir}")
+    return items, skipped

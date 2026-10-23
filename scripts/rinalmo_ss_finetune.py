@@ -25,7 +25,7 @@ import torch.nn as nn
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 import contact_common as cc          # noqa: E402
-from rinalmo_ss_lib import (SecStructPredictionHead, parse_ct,  # noqa: E402
+from rinalmo_ss_lib import (SecStructPredictionHead, load_ss_dir, parse_ct,  # noqa: E402
                             prob_mat_to_sec_struct, ss_f1, ss_precision, ss_recall)
 
 THRESHOLDS = [i / 100 for i in range(1, 30)]
@@ -83,17 +83,18 @@ def eval_tune(model, head, tok, items, device):
 @torch.no_grad()
 def eval_test(model, head, tok, items, device, thr):
     model.eval(); head.eval()
-    P, R, F = [], [], []
+    P, R, F, IDs = [], [], [], []
     for it in items:
         probs = torch.sigmoid(logits_for(model, head, tok, it["seq"], device)).float().cpu().numpy()
         ss = prob_mat_to_sec_struct(probs, it["seq"], threshold=thr)
         P.append(ss_precision(it["pair"], ss)); R.append(ss_recall(it["pair"], ss)); F.append(ss_f1(it["pair"], ss))
-    return P, R, F
+        IDs.append(it["id"])
+    return P, R, F, IDs
 
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument("--family", required=True)
+    p.add_argument("--family", default="")
     p.add_argument("--model_dir", default="outputs/fm_hybrid_mamba_kmer1_300m")
     p.add_argument("--ct_root", default="data/contact_eval/raw/ct/fam-fold")
     p.add_argument("--out_dir", default="outputs/contact_pred/rinalmo_ss_ft")
@@ -106,9 +107,24 @@ def main():
                    help="stop unfreezing at this layer idx (keep [0..min-1] frozen). giga keeps bottom 9.")
     p.add_argument("--tune_every", type=int, default=5)
     p.add_argument("--max_train", type=int, default=0, help="cap train items (0=all); for smoke tests")
+    p.add_argument("--train_dir", default="", help="explicit train dir (.ct/.st/.bpseq); bypasses family folds")
+    p.add_argument("--valid_dir", default="", help="explicit valid dir; if empty, hold out --val_frac of train")
+    p.add_argument("--test_dir", default="", help="explicit test dir")
+    p.add_argument("--test_dir2", default="", help="second test set, scored with the same tuned threshold")
+    p.add_argument("--test_name", default="test")
+    p.add_argument("--test_name2", default="test2")
+    p.add_argument("--val_frac", type=float, default=0.10, help="held-out fraction of train when no valid_dir")
+    p.add_argument("--tag", default="", help="output name + 'family' field (default: --family)")
+    p.add_argument("--split_name", default="", help="label recorded in the result JSON")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--device", default="cuda")
+    p.add_argument("--within_family", action="store_true",
+                   help="within-family split: use only this family's sequences (from test/ dir), "
+                        "split 70/15/15 train/val/test instead of LFO.")
+    p.add_argument("--within_train_frac", type=float, default=0.70)
+    p.add_argument("--within_val_frac", type=float, default=0.15)
     args = p.parse_args()
+    LABEL = args.tag or args.family
 
     torch.manual_seed(args.seed); np.random.seed(args.seed)
     device = args.device if torch.cuda.is_available() else "cpu"
@@ -118,13 +134,45 @@ def main():
     head = SecStructPredictionHead(model.config.hidden_size, num_blocks=2).to(device)
 
     root = Path(args.ct_root) / args.family
-    train, sk_tr = load_split(root / "train", args.max_len)
-    val, sk_va = load_split(root / "valid", args.max_len)
-    test, sk_te = load_split(root / "test", args.max_len)
+    if args.train_dir:
+        train, sk_tr = load_ss_dir(args.train_dir, args.max_len, parse_ct)
+        test, sk_te = load_ss_dir(args.test_dir, args.max_len, parse_ct)
+        if args.valid_dir:
+            val, sk_va = load_ss_dir(args.valid_dir, args.max_len, parse_ct)
+        else:
+            # Rivas has no official validation split: hold out a seeded fraction of train
+            rng = np.random.default_rng(args.seed)
+            idx = rng.permutation(len(train))
+            n_va = max(1, int(len(train) * args.val_frac))
+            val = [train[i] for i in idx[:n_va]]
+            train = [train[i] for i in idx[n_va:]]
+            sk_va = 0
+        print(f"[{LABEL}] {args.split_name or 'explicit'} train/val/test = "
+              f"{len(train)}/{len(val)}/{len(test)} (skipped>{args.max_len}nt: {sk_tr}/{sk_va}/{sk_te})  layers={nlayers}",
+              flush=True)
+    elif args.within_family:
+        # Load all sequences of this family (stored in test/ for the LFO fold),
+        # then do a random 70/15/15 split within-family.
+        all_items, sk_all = load_split(root / "test", args.max_len)
+        rng = np.random.default_rng(args.seed)
+        idx = rng.permutation(len(all_items))
+        n = len(idx)
+        n_tr = max(1, int(n * args.within_train_frac))
+        n_va = max(1, int(n * args.within_val_frac))
+        train = [all_items[i] for i in idx[:n_tr]]
+        val   = [all_items[i] for i in idx[n_tr:n_tr+n_va]]
+        test  = [all_items[i] for i in idx[n_tr+n_va:]]
+        sk_tr = sk_va = sk_te = sk_all
+        print(f"[{LABEL}] WITHIN-FAMILY split {n} seqs → train={len(train)} val={len(val)} test={len(test)} "
+              f"(skipped>{args.max_len}nt: {sk_all})  layers={nlayers}")
+    else:
+        train, sk_tr = load_split(root / "train", args.max_len)
+        val, sk_va = load_split(root / "valid", args.max_len)
+        test, sk_te = load_split(root / "test", args.max_len)
+        print(f"[{LABEL}] LFO train/val/test = {len(train)}/{len(val)}/{len(test)} "
+              f"(skipped>{args.max_len}nt: {sk_tr}/{sk_va}/{sk_te})  layers={nlayers}")
     if args.max_train:
         train = train[:args.max_train]
-    print(f"[{args.family}] train/val/test = {len(train)}/{len(val)}/{len(test)} "
-          f"(skipped>{args.max_len}nt: {sk_tr}/{sk_va}/{sk_te})  layers={nlayers}")
 
     # freeze backbone, head trainable
     for prm in model.parameters():
@@ -158,7 +206,7 @@ def main():
                     prm.requires_grad_(True); new_params.append(prm)
             opt.add_param_group({"params": new_params, "lr": args.base_lr / 10.0})
             base_lrs.append(args.base_lr / 10.0)
-            print(f"  [{args.family}] epoch {ep}: unfroze layers {unfreeze_at[ep]} (lr {args.base_lr/10:.1e})")
+            print(f"  [{LABEL}] epoch {ep}: unfroze layers {unfreeze_at[ep]} (lr {args.base_lr/10:.1e})")
 
         # frozen backbone stays in eval mode (dropout off, as RiNALMo's freeze());
         # only the head + already-unfrozen layers run in train mode.
@@ -181,11 +229,11 @@ def main():
                 grp["lr"] = base_lrs[gi] * factor
             tot += loss.item()
         dt = time.perf_counter() - t0
-        print(f"  [{args.family}] epoch {ep} train {len(train)} items in {dt:.0f}s "
+        print(f"  [{LABEL}] epoch {ep} train {len(train)} items in {dt:.0f}s "
               f"({len(train)/max(dt,1e-9):.1f} it/s, {len(unfrozen)} layers unfrozen) loss={tot/len(train):.4f}", flush=True)
         if (ep + 1) % args.tune_every == 0 or ep == args.epochs - 1:
             thr, vf1 = eval_tune(model, head, tok, val, device)
-            print(f"  [{args.family}] epoch {ep+1} loss={tot/len(train):.4f} val_F1={vf1:.4f} thr={thr}", flush=True)
+            print(f"  [{LABEL}] epoch {ep+1} loss={tot/len(train):.4f} val_F1={vf1:.4f} thr={thr}", flush=True)
             if vf1 > best_val_f1:
                 best_val_f1, best_thr = vf1, thr
                 best_head = {k: v.cpu().clone() for k, v in head.state_dict().items()}
@@ -193,18 +241,49 @@ def main():
 
     if best_head is not None:
         head.load_state_dict(best_head); model.load_state_dict(best_lm)
-    P, R, F = eval_test(model, head, tok, test, device, best_thr)
-    res = {"family": args.family, "backbone": "hybrid-300M", "pipeline": "RiNALMo+gradual-unfreeze-FT",
-           "num_train": len(train), "num_val": len(val), "num_test": len(test),
-           "tuned_threshold": best_thr, "best_val_F1": best_val_f1,
-           "mean_F1": statistics.mean(F) if F else 0.0,
-           "mean_precision": statistics.mean(P) if P else 0.0,
-           "mean_recall": statistics.mean(R) if R else 0.0,
-           "median_F1": statistics.median(F) if F else 0.0, "metric": "flexible(+/-1)_F1"}
+    P, R, F, IDs = eval_test(model, head, tok, test, device, best_thr)
+    def _pct(lst, q): return float(np.percentile(lst, q)) if lst else 0.0
+    split_mode = args.split_name or ("within_family" if args.within_family else "LFO")
+    res = {
+        "family": LABEL, "split": split_mode,
+        "backbone": Path(args.model_dir).name,
+        "pipeline": "RiNALMo+gradual-unfreeze-FT",
+        "num_train": len(train), "num_val": len(val), "num_test": len(test),
+        "tuned_threshold": best_thr, "best_val_F1": best_val_f1,
+        "mean_F1":   statistics.mean(F)   if F else 0.0,
+        "median_F1": statistics.median(F) if F else 0.0,
+        "mean_precision":  statistics.mean(P) if P else 0.0,
+        "mean_recall":     statistics.mean(R) if R else 0.0,
+        "q25_F1": _pct(F, 25), "q75_F1": _pct(F, 75),
+        "q10_F1": _pct(F, 10), "q90_F1": _pct(F, 90),
+        "min_F1": min(F) if F else 0.0,  "max_F1": max(F) if F else 0.0,
+        "per_seq_f1":       [round(f, 6) for f in F],
+        "per_seq_precision": [round(v, 6) for v in P],
+        "per_seq_recall":    [round(v, 6) for v in R],
+        "per_seq_ids": IDs,
+        "metric": "flexible(+/-1)_F1",
+    }
+    if args.test_dir2:
+        items2, sk2 = load_ss_dir(args.test_dir2, args.max_len, parse_ct)
+        P2, R2, F2, ID2 = eval_test(model, head, tok, items2, device, best_thr)
+        res[args.test_name2] = {
+            "num_test": len(items2), "skipped": sk2,
+            "mean_F1": statistics.mean(F2) if F2 else 0.0,
+            "median_F1": statistics.median(F2) if F2 else 0.0,
+            "mean_precision": statistics.mean(P2) if P2 else 0.0,
+            "mean_recall": statistics.mean(R2) if R2 else 0.0,
+            "per_seq_f1": [round(v, 6) for v in F2],
+            "per_seq_precision": [round(v, 6) for v in P2],
+            "per_seq_recall": [round(v, 6) for v in R2],
+            "per_seq_ids": ID2,
+        }
+        print(f"[{LABEL}] {args.test_name2} F1={res[args.test_name2]['mean_F1']:.4f} "
+              f"median={res[args.test_name2]['median_F1']:.4f} n={len(items2)}", flush=True)
+    res["test_name"] = args.test_name
     out = Path(args.out_dir); out.mkdir(parents=True, exist_ok=True)
-    json.dump(res, open(out / f"{args.family}.json", "w"), indent=2)
-    print(f"[{args.family}] TEST F1={res['mean_F1']:.4f} P={res['mean_precision']:.4f} "
-          f"R={res['mean_recall']:.4f} thr={best_thr} n={len(test)}", flush=True)
+    json.dump(res, open(out / f"{LABEL}.json", "w"), indent=2)
+    print(f"[{LABEL}] {split_mode} TEST F1={res['mean_F1']:.4f} median={res['median_F1']:.4f} "
+          f"P={res['mean_precision']:.4f} R={res['mean_recall']:.4f} thr={best_thr} n={len(test)}", flush=True)
 
 
 if __name__ == "__main__":

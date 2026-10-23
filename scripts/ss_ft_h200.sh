@@ -5,19 +5,21 @@
 #   EPOCH=2 sbatch scripts/ss_ft_h200.sh
 #   ...
 #
-# Each family gets 1 GPU; runs 9 families in 2 waves on 8 GPUs.
+# Each family gets 1 GPU; runs 9 families in N_GPU-wide waves (default 4).
+# For tighter GPU queues, override both the allocation and the wave width:
+#   EPOCH=6 sbatch --gres=gpu:nvidia_h200:1 --export=ALL,EPOCH=6,N_GPU=1 scripts/ss_ft_h200.sh
 # Writes results to outputs/fm_hybrid_650m/ss_eval/epoch{N}/*.json
 #SBATCH --job-name=rnafm_ss_ft
 #SBATCH --partition=beacon
 #SBATCH --account=angliece
 #SBATCH --qos=high
 #SBATCH --nodes=1
-#SBATCH --gres=gpu:nvidia_h200:8
-#SBATCH --cpus-per-task=64
-#SBATCH --mem=256G
+#SBATCH --gres=gpu:nvidia_h200:4
+#SBATCH --cpus-per-task=16
+#SBATCH --mem=128G
 #SBATCH --time=6:00:00
-#SBATCH --output=/beacon-homes/ziyaow/RNA_FM/logs/ss_ft_epoch%a_%j.out
-#SBATCH --error=/beacon-homes/ziyaow/RNA_FM/logs/ss_ft_epoch%a_%j.err
+#SBATCH --output=/beacon-homes/ziyaow/RNA_FM/logs/ss_ft_%j.out
+#SBATCH --error=/beacon-homes/ziyaow/RNA_FM/logs/ss_ft_%j.err
 
 set -euo pipefail
 REPO=/beacon-homes/ziyaow/RNA_FM
@@ -58,10 +60,11 @@ echo "[ss_ft] Start: $(date)"
 OUT="outputs/fm_hybrid_650m/ss_eval/epoch${EPOCH}"
 mkdir -p "$OUT" logs
 
+N_GPU=${N_GPU:-4}
 FAMILIES="5s 16s 23s grp1 srp telomerase RNaseP tmRNA tRNA"
 i=0
 for fam in $FAMILIES; do
-    gpu=$(( i % 8 ))
+    gpu=$(( i % N_GPU ))
     LOG="logs/ss_ft_epoch${EPOCH}_${fam}.log"
     ( CUDA_VISIBLE_DEVICES=$gpu python scripts/rinalmo_ss_finetune.py \
         --family "$fam" \
@@ -73,10 +76,9 @@ for fam in $FAMILIES; do
         > "$LOG" 2>&1
       echo "[ss_ft] $fam done (gpu $gpu)" ) &
     i=$(( i + 1 ))
-    # Launch next wave after 8 jobs
-    if (( i % 8 == 0 )); then
+    if (( i % N_GPU == 0 )); then
         wait
-        echo "[ss_ft] Wave $((i/8)) done"
+        echo "[ss_ft] Wave $((i/N_GPU)) done"
     fi
 done
 wait

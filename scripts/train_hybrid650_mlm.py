@@ -3,8 +3,9 @@
 
 Backbone : hybrid Transformer+Mamba, 664M params (hidden 1280, 33 layers TTMx11,
            20 heads, FFN 5120, mamba_expand 4), SDPA attention. ctx 1022.
-Data     : FULL RNAcentral, streamed from /dev/shm cache, on-the-fly random crop
-           for L>1022 (different window each epoch). single-nuc tokenizer.
+Data     : mmseqs-clustered RNAcentral, one randomly resampled member per
+           cluster per epoch (scripts/sample_cluster_epochs.py), streamed from
+           /dev/shm; on-the-fly random crop for L>1022. single-nuc tokenizer.
 MLM      : 15% / 80-10-10, loss on masked only (scripts/rna_stream_dataset.py).
 Optim    : AdamW lr 5e-5, wd 0.01, betas (0.9,0.999), eps 1e-8.
 Sched    : warmup 2000 -> cosine decay to min_lr 1e-5.
@@ -28,8 +29,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 from models.hybrid_mamba_bert import HybridMambaConfig, HybridMambaForMaskedLM  # noqa: E402
-from rna_stream_dataset import (MLMCollator, RNAStreamDataset, build_shm_cache,  # noqa: E402
-                                encode)
+from rna_stream_dataset import (MLMCollator, RNAStreamDataset,  # noqa: E402
+                                build_shm_cache_per_epoch, encode,
+                                epoch_cache_is_fresh)
 
 
 def build_val(val_path, max_len, n_max, seed):
@@ -55,9 +57,9 @@ def build_val(val_path, max_len, n_max, seed):
 
 def parse_args():
     p = argparse.ArgumentParser()
-    p.add_argument("--gz", default="data/raw/rnacentral_active.fasta.gz")
-    p.add_argument("--shm", default="/dev/shm/rna_seqs.txt")
-    p.add_argument("--val_seqs", default="outputs/fm_hybrid_650m/val_seqs.txt")
+    p.add_argument("--epoch_dir", default="/beacon-projects/rnallm/data/rnacentral/epoch_seqs",
+                   help="dir with epoch{1..N}.txt + val.txt + meta.json from sample_cluster_epochs.py")
+    p.add_argument("--shm_dir", default="/dev/shm")
     p.add_argument("--vocab_dir", default="tokenizers/single")
     p.add_argument("--output_dir", default="outputs/fm_hybrid_650m")
     p.add_argument("--max_len", type=int, default=1022)
@@ -73,6 +75,11 @@ def parse_args():
     p.add_argument("--num_workers", type=int, default=4)
     p.add_argument("--logging_steps", type=int, default=50)
     p.add_argument("--val_steps", type=int, default=0, help="0 = once per epoch")
+    p.add_argument("--save_steps", type=int, default=0,
+                   help="checkpoint interval; 0 = once per epoch (fine for small "
+                        "epoch_dir, but for full-data runs epoch boundaries can be "
+                        "tens of thousands of steps apart -- pass an explicit small "
+                        "value so a job-time-limit kill doesn't lose everything)")
     p.add_argument("--val_samples", type=int, default=4096)
     p.add_argument("--seed", type=int, default=42)
     # model
@@ -82,6 +89,7 @@ def parse_args():
     p.add_argument("--layer_pattern", default="TTM" * 11)
     p.add_argument("--mamba_expand", type=int, default=4)
     p.add_argument("--mamba_d_state", type=int, default=16)
+    p.add_argument("--mamba_d_conv", type=int, default=4)
     return p.parse_args()
 
 
@@ -193,14 +201,17 @@ def main():
     out = Path(args.output_dir); out.mkdir(parents=True, exist_ok=True)
     log = (lambda *a: print(*a, flush=True)) if is_main else (lambda *a: None)
 
-    # ---- data cache (built once; ranks wait for the marker) ----
-    marker = Path(str(args.shm) + ".done")
-    if is_main and not marker.exists():
-        build_shm_cache(args.gz, args.shm, args.val_seqs, log=log)
-    while not marker.exists():
+    # ---- data cache (rank0 rebuilds if stale/missing; others just wait --
+    # the purge+copy in build_shm_cache_per_epoch is not safe to run from
+    # multiple ranks concurrently) ----
+    meta = json.load(open(Path(args.epoch_dir) / "meta.json"))
+    if is_main and not epoch_cache_is_fresh(args.epoch_dir, args.shm_dir, meta):
+        build_shm_cache_per_epoch(args.epoch_dir, args.shm_dir, log=log)
+    while not epoch_cache_is_fresh(args.epoch_dir, args.shm_dir, meta):
         time.sleep(10)
-    n_train = int(marker.read_text().split()[0])
-    steps_per_epoch = math.ceil(n_train / (args.micro_batch * 8 * args.grad_accum))
+    n_train, val_shm, epoch_shm_paths = build_shm_cache_per_epoch(args.epoch_dir, args.shm_dir, log=log)
+    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    steps_per_epoch = math.ceil(n_train / (args.micro_batch * world_size * args.grad_accum))
     max_steps = steps_per_epoch * args.epochs
     log(f"[run] n_train={n_train:,}  steps/epoch={steps_per_epoch:,}  max_steps={max_steps:,}")
 
@@ -211,7 +222,7 @@ def main():
         max_position_embeddings=args.max_len + 4, type_vocab_size=1,
         hidden_dropout_prob=0.1, attention_probs_dropout_prob=0.1, pad_token_id=0,
         layer_pattern=args.layer_pattern, mamba_d_state=args.mamba_d_state,
-        mamba_d_conv=4, mamba_expand=args.mamba_expand, tie_word_embeddings=False,
+        mamba_d_conv=args.mamba_d_conv, mamba_expand=args.mamba_expand, tie_word_embeddings=False,
         attn_implementation="sdpa")
     model = HybridMambaForMaskedLM(config)
     if is_main:
@@ -220,16 +231,30 @@ def main():
         json.dump(pc, open(out / "model_param_count.json", "w"), indent=2)
         json.dump(config.to_dict(), open(out / "model_config.json", "w"), indent=2, default=str)
 
-    train_ds = RNAStreamDataset(args.shm, max_len=args.max_len,
+    # Resuming past N already-trained epochs? Start the per-epoch cluster
+    # resampling at file N instead of replaying epoch1's data again --
+    # RNAStreamDataset's internal epoch counter otherwise always starts at 0,
+    # independent of the Trainer's restored global_step.
+    ckpts = list(Path(args.output_dir).glob("checkpoint-*"))
+    start_epoch = 0
+    if ckpts:
+        state_f = ckpts[0] / "trainer_state.json"
+        if state_f.exists():
+            prev_step = json.load(open(state_f))["global_step"]
+            start_epoch = prev_step // steps_per_epoch
+            log(f"[resume] found checkpoint at step {prev_step} -> start_epoch={start_epoch}")
+
+    train_ds = RNAStreamDataset(epoch_shm_paths, max_len=args.max_len,
                                 shuffle_buffer=args.shuffle_buffer, seed=args.seed,
-                                group_size=args.micro_batch)
+                                group_size=args.micro_batch, start_epoch=start_epoch)
     collator = MLMCollator(mlm_probability=args.mlm_probability, seed=args.seed)
-    val_batches = build_val(args.val_seqs, args.max_len, args.val_samples, args.seed) if is_main else []
+    val_batches = build_val(val_shm, args.max_len, args.val_samples, args.seed) if is_main else []
 
     targs = TrainingArguments(
         output_dir=args.output_dir, overwrite_output_dir=False,
         do_train=True, do_eval=False, eval_strategy="no",
-        max_steps=max_steps, save_strategy="steps", save_steps=steps_per_epoch,
+        max_steps=max_steps, save_strategy="steps",
+        save_steps=args.save_steps or steps_per_epoch,
         save_total_limit=1, save_safetensors=False,
         per_device_train_batch_size=args.micro_batch,
         gradient_accumulation_steps=args.grad_accum,
@@ -247,7 +272,6 @@ def main():
     trainer = Trainer(model=model, args=targs, train_dataset=train_ds,
                       data_collator=collator, callbacks=[curve_cb, epoch_ckpt_cb])
 
-    ckpts = list(Path(args.output_dir).glob("checkpoint-*"))
     trainer.train(resume_from_checkpoint=bool(ckpts))
     trainer.save_model(args.output_dir)
     if is_main:
@@ -255,6 +279,9 @@ def main():
                    "max_steps": max_steps, "tokens_per_epoch_approx": 18.85e9,
                    "effective_batch": args.micro_batch * 8 * args.grad_accum},
                   open(out / "run_budget.json", "w"), indent=2)
+        # Marks the full run (all args.epochs) as actually finished -- lets the
+        # SLURM self-requeue chain in pretrain_h200.sh stop submitting follow-ups.
+        (out / "TRAINING_COMPLETE").write_text(f"max_steps={max_steps}\n")
         log(f"[done] saved -> {args.output_dir}")
 
 
