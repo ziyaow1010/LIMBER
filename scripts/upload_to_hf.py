@@ -20,34 +20,36 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # subfolder -> local model dir (real paths, not symlinks)
 MODELS = {
-    "kmer1-BERT":      "outputs/bert_mlm/fm_single",
-    "LIMBER-6L256-early":    "outputs/fm_hybrid_mamba_kmer1",
-    "kmer1-decoder":   "outputs/fm_decoder_kmer1",
-    "kmer6-BERT":      "outputs/bert_mlm/fm_kmer6",
-    "kmer6-Hybrid":    "outputs/fm_hybrid_mamba_kmer6",
-    "kmer6-decoder":   "outputs/fm_decoder_kmer6",
-    "LIMBER-meso-thin": "outputs/fm_hybrid_mamba_kmer1_300m",
-    # Hybrid-650M, epoch-1 checkpoint (RiNALMo-Giga-aligned run; pretraining to be
-    # finished on H200 — see HANDOFF.md). Clean LM weights, no optimizer state.
-    "LIMBER-macro-ep1": "outputs/fm_hybrid_650m/ss_ft_ep1_model",
-    # Hybrid-10M, epoch-6 checkpoint. 12-layer TTM×4, hidden=256.
-    "LIMBER-10M":      "outputs/hybrid_10m/epoch_checkpoints/epoch6",
-    # Hybrid-100M, epoch-12 checkpoint. 18-layer TTM×6, hidden=640.
-    "LIMBER-nano": "outputs/fm_hybrid_100m/epoch_checkpoints/epoch12",
-    # Hybrid-300M, epoch-12 checkpoint. 15-layer TTM×5, hidden=1280.
-    "LIMBER-meso": "outputs/fm_hybrid_300m/epoch_checkpoints/epoch12",
-    # Pure-Mamba-100M, epoch-6 checkpoint. 18 all-M layers, hidden=640.
+    # ---- LIMBER (TTM hybrid), named as in the paper ------------------------
+    "LIMBER-nano":            "outputs/fm_hybrid_100m/epoch_checkpoints/epoch12",
+    "LIMBER-meso":            "outputs/fm_hybrid_300m/epoch_checkpoints/epoch12",
+    "LIMBER-macro":           "outputs/fm_hybrid_650m/epoch_checkpoints/epoch12",
+    "LIMBER-nano-ep6":        "outputs/fm_hybrid_100m/epoch_checkpoints/epoch6",
+    "LIMBER-meso-ep6":        "outputs/fm_hybrid_300m/epoch_checkpoints/epoch6",
+    "LIMBER-macro-ep6":       "outputs/fm_hybrid_650m/epoch_checkpoints/epoch6",
+    "LIMBER-macro-ep9":       "outputs/fm_hybrid_650m/epoch_checkpoints/epoch9",
+    "LIMBER-50M":             "outputs/fm_hybrid_50m/epoch_checkpoints/epoch6",
+    "LIMBER-10M":             "outputs/hybrid_10m/epoch_checkpoints/epoch6",
+    # ---- LIMBER ablations --------------------------------------------------
+    "LIMBER-nano-dconv2":     "outputs/fm_hybrid_100m_dconv2",          # conv width 2 (default 4)
+    "LIMBER-nano-thin":       "outputs/hybrid_100m_thin/epoch_checkpoints/epoch6",   # 30 x 512
+    "LIMBER-nano-wide":       "outputs/hybrid_100m_wide/epoch_checkpoints/epoch6",   # 12 x 768
+    "LIMBER-nano-data20pct":  "outputs/hybrid_100m_20pct/epoch_checkpoints/epoch6",
+    "LIMBER-nano-data40pct":  "outputs/hybrid_100m_40pct/epoch_checkpoints/epoch6",
+    "LIMBER-nano-data60pct":  "outputs/hybrid_100m_60pct/epoch_checkpoints/epoch6",
+    "LIMBER-nano-data80pct":  "outputs/hybrid_100m_80pct/epoch_checkpoints/epoch6",
+    # ---- size-matched single-architecture controls -------------------------
+    "bert_100m_epoch6":       "outputs/bert_100m/epoch_checkpoints/epoch6",
+    "bert_300m_epoch6":       "outputs/bert_300m/epoch_checkpoints/epoch6",
+    "bert_650m_epoch6":       "outputs/fm_pure_transformer_650m",
     "kmer1-PureMamba-100M":   "outputs/fm_pure_mamba_100m/epoch_checkpoints/epoch6",
-    # Pure-Mamba-300M, epoch-6 checkpoint. 15 all-M layers, hidden=1280.
     "kmer1-PureMamba-300M":   "outputs/fm_pure_mamba_300m/epoch_checkpoints/epoch6",
-    # Pure-Transformer-650M, final 6-epoch weights. 33 all-T layers, hidden=1280.
-    "bert_650m_epoch6": "outputs/fm_pure_transformer_650m",
-    # Hybrid-100M with Mamba local-conv width 2 (d_conv=2 ablation vs the default 4).
-    # Final end-of-6-epoch weights. 18-layer TTM x6, hidden=640.
-    "LIMBER-nano-dconv2": "outputs/fm_hybrid_100m_dconv2",
-    # Pure-Mamba-650M, final 6-epoch weights. 33 all-M layers, hidden=1280.
-    "PureMamba-650M": "outputs/fm_pure_mamba_650m",
+    "PureMamba-650M":         "outputs/fm_pure_mamba_650m",
 }
+# Earlier k-mer / decoder experiments (kmer1-BERT, kmer6-*, *-decoder, the 6-layer
+# LIMBER-6L256-early and the 24x1024 LIMBER-meso-thin) are already on the Hub but
+# their local training outputs have been deleted, so they cannot be re-uploaded
+# from here and are no longer listed.
 # only top-level final-model files (bare names -> won't match checkpoint-*/ subdirs)
 ALLOW = ["config.json", "model.safetensors", "pytorch_model.bin",
          "model_config.json", "tokenizer_config.json", "vocab.txt",
