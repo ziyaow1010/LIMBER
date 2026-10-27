@@ -21,4 +21,4 @@ cd "$REPO"
 python scripts/upload_to_hf.py \
     --token "$HF_TOKEN" \
     --username Ziyao1010 \
-    --only kmer1-Hybrid-100M-ep12
+    --only LIMBER-nano

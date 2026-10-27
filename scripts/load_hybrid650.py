@@ -27,8 +27,8 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 from models.hybrid_mamba_bert import HybridMambaConfig, HybridMambaForMaskedLM  # noqa: E402
 
-HF_REPO = "Ziyao1010/RNA_FM"
-HF_SUBFOLDER = "kmer1-Hybrid-650M-ep1"
+HF_REPO = "Ziyao1010/LIMBER"
+HF_SUBFOLDER = "LIMBER-macro"        # 650M, epoch 12 — the model reported in the paper
 NUC = {"A": 5, "U": 6, "C": 7, "G": 8, "N": 9}
 CLS, SEP = 2, 3
 _CFG_KEYS = ("vocab_size", "hidden_size", "num_attention_heads", "intermediate_size",

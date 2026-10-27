@@ -18,7 +18,7 @@ and compute scale.
 ## Model zoo
 
 Weights live in a single Hugging Face repo, one subfolder per model:
-[`Ziyao1010/RNA_FM`](https://huggingface.co/Ziyao1010/RNA_FM).
+[`Ziyao1010/LIMBER`](https://huggingface.co/Ziyao1010/LIMBER).
 
 | Model | Layers | Hidden | Heads | FFN | Pattern | Params |
 |---|---|---|---|---|---|---|
