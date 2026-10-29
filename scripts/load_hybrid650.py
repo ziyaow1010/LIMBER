@@ -59,6 +59,22 @@ def encode(seq):
 
 
 @torch.no_grad()
+def embed(model, input_ids, attention_mask=None):
+    """Per-nucleotide final-layer representations: [B, L, hidden_size].
+
+    `forward` only returns MLM logits, so run the encoder stack directly -- the
+    same path the downstream fine-tuning scripts use.
+    """
+    if attention_mask is None:
+        attention_mask = torch.ones_like(input_ids)
+    h = model.embeddings(input_ids=input_ids, token_type_ids=None)
+    ext = (1.0 - attention_mask[:, None, None, :].to(h.dtype)) * torch.finfo(h.dtype).min
+    for layer, is_m in zip(model.layers, model.is_mamba):
+        h = layer(h) if is_m else layer(h, attention_mask=ext)[0]
+    return h
+
+
+@torch.no_grad()
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model_dir", default=None, help="local dir; default = download from HF")
