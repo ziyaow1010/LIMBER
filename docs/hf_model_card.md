@@ -69,7 +69,6 @@ the architecture is the only variable: `bert_100m_epoch6`, `bert_300m_epoch6`, `
 | Training budget | `LIMBER-nano-ep6`, `LIMBER-meso-ep6`, `LIMBER-macro-ep1`, `-ep6`, `-ep9` |
 | Shape at fixed budget | `LIMBER-nano-thin`, `LIMBER-nano-wide`, `LIMBER-meso-thin`, `LIMBER-6L256-early` |
 | Convolution width | `LIMBER-nano-dconv2` (width 2 instead of 4) |
-| Tokenization and objective | `kmer1-BERT`, `kmer6-BERT`, `kmer6-Hybrid`, `kmer1-decoder`, `kmer6-decoder` |
 
 ## Quick start
 

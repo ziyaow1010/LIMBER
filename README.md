@@ -179,10 +179,10 @@ Mamba layers use a 16-dimensional state space, causal convolution width 4 and ex
 The same `HybridMambaForMaskedLM` class covers all three architectures — `layer_pattern` in
 `model_config.json` selects between `TTMTTM...`, `TTTTTT...` and `MMMMMM...`.
 
-Thirty checkpoints in all. Beyond the table, the Hub repo carries the complete scaling and
+Twenty-five checkpoints in all. Beyond the table, the Hub repo carries the complete scaling and
 ablation panel: LIMBER-nano pretrained on 20/40/60/80/100% of the corpus, intermediate-epoch
-checkpoints for the training-budget analysis, a `d_conv = 2` convolution-width ablation,
-thin/wide shape variants at fixed budget, and the early k-mer and decoder-objective exploration.
+checkpoints for the training-budget analysis, a `d_conv = 2` convolution-width ablation, and
+thin/wide shape variants at fixed parameter budget.
 
 ## Quick start
 

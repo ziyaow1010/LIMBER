@@ -46,10 +46,10 @@ MODELS = {
     "kmer1-PureMamba-300M":   "outputs/fm_pure_mamba_300m/epoch_checkpoints/epoch6",
     "PureMamba-650M":         "outputs/fm_pure_mamba_650m",
 }
-# Earlier k-mer / decoder experiments (kmer1-BERT, kmer6-*, *-decoder, the 6-layer
-# LIMBER-6L256-early and the 24x1024 LIMBER-meso-thin) are already on the Hub but
-# their local training outputs have been deleted, so they cannot be re-uploaded
-# from here and are no longer listed.
+# The early k-mer / decoder experiments (kmer1-BERT, kmer6-*, *-decoder) were
+# removed from the Hub -- they are not part of the paper. LIMBER-6L256-early and
+# the 24x1024 LIMBER-meso-thin are still on the Hub but their local training
+# outputs are gone, so they cannot be re-uploaded from here and are not listed.
 # only top-level final-model files (bare names -> won't match checkpoint-*/ subdirs)
 ALLOW = ["config.json", "model.safetensors", "pytorch_model.bin",
          "model_config.json", "tokenizer_config.json", "vocab.txt",
