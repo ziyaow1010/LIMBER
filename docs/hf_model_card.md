@@ -12,9 +12,12 @@ tags:
 
 <div align="center">
 
-<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/limber_banner_light.png" alt="LIMBER — Layer-Interleaved Mamba-Bidirectional Encoder for RNA" width="100%">
+<h1>LIMBER</h1>
 
-<h3>A Hybrid RNA Foundation Model for Predicting and Understanding<br>RNA Structure and Function</h3>
+<h3>Layer-Interleaved Mamba&ndash;Bidirectional Encoder for RNA<br>
+<sub>A Hybrid RNA Foundation Model for Predicting and Understanding RNA Structure and Function</sub></h3>
+
+<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/fig1_overview.png" alt="Overview of the LIMBER architecture, the task-agnostic evaluation framework and the downstream applications" width="100%">
 
 <!-- TODO: add the bioRxiv DOI once the preprint is live -->
 [**Paper**](#) · [**Code**](https://github.com/ziyaow1010/LIMBER) · [**Quick start**](#quick-start)
@@ -118,7 +121,9 @@ to N. Position embeddings cover 1,026 tokens, giving a usable sequence length of
 
 ## Results
 
-<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/limber_benchmarks_light.png" alt="LIMBER benchmark results" width="100%">
+<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/fig5_secondary_structure.png" alt="Secondary-structure prediction benchmarks" width="100%">
+
+<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/fig6_downstream.png" alt="ncRNA classification, IRES, MRL and RNA-small-molecule interaction results" width="100%">
 
 Every baseline is fine-tuned and evaluated by us under the same protocol as LIMBER, so the RNA
 encoder is the only variable.
@@ -158,9 +163,10 @@ LIMBER-nano 0.882 / 0.819, far ahead of the other ~100M models.
 highest of any model tested, and takes the top AUPRC (0.852) on the independent 104-sequence
 benchmark, ahead of the task-specific DeepIRES.
 
-**RNA–small-molecule interactions** — dropped into the SMRTnet multimodal framework, LIMBER-macro
-surpasses RiNALMo-giga and AIDO.RNA-650M, and LIMBER-nano outperforms RNA-FM, structRFM and
-SMRTnet's own RNASwan-seq encoder.
+**RNA–small-molecule interactions** — held-out AUROC with each encoder dropped into the SMRTnet
+multimodal framework (5-fold CV × 3 seeds): LIMBER-macro **0.848 ± 0.034**, RiNALMo-giga
+0.846 ± 0.028, LIMBER-nano **0.844 ± 0.034**, RNA-FM 0.841 ± 0.023, structRFM 0.840 ± 0.027,
+RNASwan-seq 0.837 ± 0.036, AIDO.RNA-650M 0.831 ± 0.034.
 
 ## What pretraining alone produces
 
@@ -170,6 +176,8 @@ directly — no labels, no fine-tuning, no auxiliary probe to train: the **categ
 (contact maps from output-logit sensitivity to every single-nucleotide substitution),
 **embedding perturbation** (the same signal, per layer), a **spectral family probe** (homologous
 vs non-homologous pair separation in FFT features) and **likelihood-ratio fitness**.
+
+<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/fig2_zeroshot.png" alt="Zero-shot structure recovery, classification and fitness across RNA language models" width="100%">
 
 Contact maps extracted from LIMBER-macro with no fine-tuning whatsoever, normalized AUPR across
 the seven source datasets of bpRNA-1m(90):
@@ -192,7 +200,7 @@ structure carry the sharpest discrimination between RNA families. That is what l
 
 ## Scaling behaviour
 
-<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/limber_scaling_light.png" alt="LIMBER scaling behaviour" width="100%">
+<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/edfig2_model_scaling.png" alt="Scaling with model size across perplexity, structure recovery, classification and fitness" width="100%">
 
 Every variant in this repo was pretrained on the same corpus with the same optimizer, so the
 three scaling axes separate cleanly.

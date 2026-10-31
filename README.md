@@ -1,11 +1,9 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/limber_banner_dark.png">
-  <img src="assets/limber_banner_light.png" alt="LIMBER — Layer-Interleaved Mamba-Bidirectional Encoder for RNA" width="100%">
-</picture>
+<h1>LIMBER</h1>
 
-<h3>A Hybrid RNA Foundation Model for Predicting and Understanding<br>RNA Structure and Function</h3>
+<h3>Layer-Interleaved Mamba&ndash;Bidirectional Encoder for RNA<br>
+<sub>A Hybrid RNA Foundation Model for Predicting and Understanding RNA Structure and Function</sub></h3>
 
 <!-- TODO: add the bioRxiv DOI once the preprint is live -->
 [![Paper](https://img.shields.io/badge/bioRxiv-preprint-b31b1b?style=flat-square)](#)
@@ -16,6 +14,8 @@
 **Ziyao Wang**<sup>1†</sup> · **Yunrui Qiu**<sup>2†\*</sup> · Yexiao He<sup>1</sup> · Isabel Thompson<sup>2</sup> · Hongli Wang<sup>2</sup> · Adam Porter<sup>3</sup> · **Ang Li**<sup>1\*</sup>
 
 <sub><sup>1</sup>Dept. of Electrical and Computer Engineering, University of Maryland, College Park · <sup>2</sup>Dept. of Chemistry and Biochemistry, University of Notre Dame · <sup>3</sup>Dept. of Computer Science, University of Maryland, College Park<br><sup>†</sup>Equal contribution · <sup>\*</sup>Corresponding authors</sub>
+
+<img src="assets/fig1_overview.png" alt="Overview of the LIMBER architecture, the task-agnostic evaluation framework and the downstream applications" width="100%">
 
 [**Paper**](#) · [**Models**](https://huggingface.co/Ziyao1010/LIMBER) · [**Quick start**](#quick-start) · [**Results**](#results) · [**Zero-shot framework**](#what-pretraining-alone-produces) · [**Scaling**](#scaling-behaviour) · [**Reproduce**](#reproducing-the-paper)
 
@@ -67,7 +67,7 @@ pure-Mamba models** trained under identical settings — every one of them relea
   predominantly non-coding corpus.
 - **A controlled architecture comparison.** Pure-Transformer and pure-Mamba models at 100M, 300M
   and 650M parameters, trained on the same data with the same optimizer, isolate what the hybrid
-  design actually contributes.
+  design actually contributes — see `assets/fig3_architecture.png`.
 - **Scaling laws that differ by capability.** With data, optimizer and corpus held fixed across
   every variant, the three axes separate cleanly. Model capacity is the strongest lever
   (zero-shot structure recovery **0.301 → 0.646** from 10M to 650M); data saturates around half
@@ -78,10 +78,9 @@ pure-Mamba models** trained under identical settings — every one of them relea
 
 ## Results
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/limber_benchmarks_dark.png">
-  <img src="assets/limber_benchmarks_light.png" alt="LIMBER benchmark results" width="100%">
-</picture>
+<img src="assets/fig5_secondary_structure.png" alt="Secondary-structure prediction: TS0, Rivas TestSetB and ArchiveII leave-one-family-out" width="100%">
+
+<img src="assets/fig6_downstream.png" alt="ncRNA classification, IRES identification, MRL prediction and RNA-small-molecule interaction modelling" width="100%">
 
 Every baseline below is fine-tuned and evaluated by us under the same protocol as LIMBER, so the
 RNA encoder is the only variable.
@@ -153,11 +152,17 @@ LIMBER-nano matches models six times its size and leaves the other ~100M models 
 
 Dropping each RNA encoder into the [SMRTnet](https://doi.org/10.1038/s41587-025-02942-z)
 multimodal framework — chemical language model, graph-attention encoder and co-attention fusion
-all unchanged — and fine-tuning end-to-end over five-fold cross-validation × three seeds,
-LIMBER-macro surpasses RiNALMo-giga and AIDO.RNA-650M on held-out AUROC, and LIMBER-nano
-outperforms RNA-FM, structRFM and SMRTnet's own RNASwan-seq encoder. On the 2,011-interaction
-external benchmark, scored by sliding-window ensembling without prior knowledge of the binding
-pocket, both LIMBER variants hold up across accuracy, precision, recall, AUROC and AUPRC.
+all unchanged — and fine-tuning end-to-end over five-fold cross-validation × three seeds
+(15 models per encoder), held-out AUROC on the 24,687-pair dataset:
+
+| Encoder | LIMBER-macro | RiNALMo-giga | LIMBER-nano | RNA-FM | structRFM | RNASwan-seq | AIDO.RNA-650M |
+|---|---|---|---|---|---|---|---|
+| **AUROC** | **0.848 ± 0.034** | 0.846 ± 0.028 | **0.844 ± 0.034** | 0.841 ± 0.023 | 0.840 ± 0.027 | 0.837 ± 0.036 | 0.831 ± 0.034 |
+
+LIMBER-nano beats RNA-FM, structRFM and SMRTnet's own RNASwan-seq encoder at a comparable size.
+On the 2,011-interaction external benchmark, scored by sliding-window ensembling without prior
+knowledge of the binding pocket, both LIMBER variants hold up across accuracy, precision, recall,
+AUROC and AUPRC.
 
 ## What pretraining alone produces
 
@@ -174,6 +179,10 @@ evolution and function.
 | **Spectral family probe** | Do the representations separate homologous from non-homologous sequence pairs? FFT spectral features per layer, scored by distribution overlap | `scripts/extract_family_cls_full.py`, `scripts/nrc_zeroshot.py` |
 | **Likelihood-ratio fitness** | Do wild-type-conditioned log-likelihood ratios track measured mutational effects? One forward pass per wild type | `scripts/make_fig_fitness_landscape.py` |
 | **Layer ablation** | Which layers actually matter? Perplexity, contact recovery and fitness correlation with one layer removed, or the encoder truncated | `scripts/layer_importance.py` |
+
+<img src="assets/fig2_zeroshot.png" alt="Task-agnostic evaluation: zero-shot structure recovery, family classification and fitness prediction across RNA language models" width="100%">
+
+<sub>(a) Zero-shot secondary-structure recovery by categorical Jacobian across the bpRNA-1m(90) datasets and RNA families. (b) Family- and type-level classification, scored by overlap ratio (lower is better). (c) Fitness prediction across 33 deep mutational scanning assays. Thirteen RNA language models and two thermodynamic predictors, none fine-tuned.</sub>
 
 ### Secondary structure, read straight out of the model
 
@@ -204,6 +213,8 @@ separation of every RNA language model tested.
 
 ### Information is organized hierarchically, not monotonically
 
+<img src="assets/fig4_layerwise.png" alt="Layer-wise interpretation of LIMBER-macro: single-layer ablation, layer-wise classification and progressive accumulation of structural information" width="100%">
+
 Layer ablation and embedding perturbation together show that **deeper is not uniformly better**.
 Structural information accumulates in the final two or three layers, and ablating the Mamba
 layers near the start and end of the encoder damages contact recovery and fitness correlation the
@@ -214,10 +225,9 @@ to its first 14 layers for classification and keep 98.4% accuracy at ~43% of the
 
 ## Scaling behaviour
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/limber_scaling_dark.png">
-  <img src="assets/limber_scaling_light.png" alt="LIMBER scaling behaviour across model size, data and compute" width="100%">
-</picture>
+<img src="assets/edfig2_model_scaling.png" alt="Scaling with model size: perplexity, zero-shot structure recovery, classification and fitness, each model against the next larger one" width="100%">
+
+<sub>Each panel compares a model against the next larger one across 26,707 sequences and 33 mutational scanning assays: points above the diagonal are sequences the larger model handles better.</sub>
 
 Because every variant was pretrained by us on the same corpus with the same optimizer, the three
 scaling axes can be separated cleanly — something published RLM comparisons cannot do, since they
@@ -361,7 +371,7 @@ with masks drawn from a fixed seed, so every model is scored at identical positi
 | ncRNA classification | nRC, 13 classes | `scripts/nrc_finetune.py` |
 | IRES identification | DeepIRES benchmark | `scripts/downstream_finetune.py --task ires` |
 | Mean ribosome load | 5′UTR MPRA library | `scripts/downstream_finetune.py --task mrl` |
-| README figures | — | `scripts/make_readme_figures.py` |
+| README figures | the manuscript PDF | `scripts/extract_paper_figures.py` |
 
 Secondary-structure fine-tuning follows RiNALMo's published protocol: a residual convolutional
 pairwise head, BCE on the upper triangle, gradual unfreezing of three encoder blocks every three
