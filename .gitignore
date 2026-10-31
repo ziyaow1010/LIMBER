@@ -57,8 +57,7 @@ data/ss_bench/
 new_inf/*.cvs
 new_inf/__pycache__/
 # vendored Zfold / trRosettaRNA source (from the structRFM repo, kept out of this tree)
-rna3d/Zfold/
-rna3d/_stage*/
-rna3d/*.csv
+# tertiary-structure work: not part of the paper, kept local only
+rna3d/
 _stage_ssbench/
 _ssbench_out/

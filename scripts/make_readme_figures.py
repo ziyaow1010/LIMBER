@@ -222,9 +222,71 @@ def benchmarks(theme: str):
     plt.close(fig)
 
 
+# ── scaling panels ────────────────────────────────────────────────
+
+SCALING = [
+    ("Model capacity", "LIMBER at 6 epochs, full corpus",
+     "zero-shot structure recovery (normalized AUPR)",
+     ["10M", "50M", "100M", "300M", "650M"],
+     [0.301, 0.429, 0.590, 0.642, 0.646], "up"),
+    ("Pretraining data", "LIMBER-nano at 6 epochs",
+     "validation perplexity (lower is better)",
+     ["20%", "40%", "60%", "80%", "100%"],
+     [1.563, 1.498, 1.467, 1.447, 1.434], "down"),
+    ("Training compute", "LIMBER-macro, full corpus",
+     "validation perplexity (lower is better)",
+     ["3 ep", "6 ep", "9 ep", "12 ep"],
+     [1.399, 1.375, 1.365, 1.358], "down"),
+]
+
+
+def scaling(theme: str):
+    t = THEMES[theme]
+    fig, axes = plt.subplots(1, 3, figsize=(15, 3.9), dpi=200)
+    fig.patch.set_facecolor(t["surface"])
+
+    for ax, (title, sub, ylab, xs, ys, direction) in zip(axes, SCALING):
+        ax.set_facecolor(t["surface"])
+        x = list(range(len(xs)))
+        ax.plot(x, ys, lw=2, color=t["blue"], zorder=3, solid_capstyle="round")
+        ax.plot(x, ys, marker="o", ms=9, ls="none", color=t["blue"],
+                mec=t["surface"], mew=2, zorder=4)
+
+        lo, hi = min(ys), max(ys)
+        pad = (hi - lo) * 0.28 or 0.1
+        ax.set_ylim(lo - pad, hi + pad * 1.15)
+        for i, (xx, yy) in enumerate(zip(x, ys)):            # label the two ends only
+            if i not in (0, len(ys) - 1):
+                continue
+            up = (direction == "up") == (i == len(ys) - 1)
+            ax.annotate(f"{yy:.3f}", (xx, yy), textcoords="offset points",
+                        xytext=(0, 11 if up else -19), ha="center",
+                        fontsize=10, color=t["ink"], family=SANS, zorder=5)
+
+        ax.set_xticks(x); ax.set_xticklabels(xs, fontsize=9.5, color=t["ink2"], family=SANS)
+        ax.set_xlim(-0.35, len(xs) - 0.65)
+        ax.set_yticks([])
+        ax.tick_params(axis="x", length=0, pad=5)
+        for sp in ("top", "right", "left"):
+            ax.spines[sp].set_visible(False)
+        ax.spines["bottom"].set_color(t["grid"])
+        ax.text(0, 1.255, title, transform=ax.transAxes, fontsize=12.5,
+                color=t["ink"], family=SANS, va="bottom")
+        ax.text(0, 1.145, sub, transform=ax.transAxes, fontsize=9,
+                color=t["muted"], family=SANS, va="bottom")
+        ax.text(0, 1.045, ylab, transform=ax.transAxes, fontsize=8.5,
+                color=t["ink2"], family=SANS, va="bottom", style="italic")
+
+    fig.tight_layout(rect=(0, 0, 1, 0.86))
+    fig.savefig(ASSETS / f"limber_scaling_{theme}.png", facecolor=t["surface"],
+                bbox_inches="tight", pad_inches=0.22)
+    plt.close(fig)
+
+
 if __name__ == "__main__":
     ASSETS.mkdir(exist_ok=True)
     for th in ("light", "dark"):
         banner(th)
         benchmarks(th)
+        scaling(th)
     print("wrote:", *sorted(p.name for p in ASSETS.glob("*.png")))

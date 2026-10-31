@@ -17,7 +17,7 @@
 
 <sub><sup>1</sup>Dept. of Electrical and Computer Engineering, University of Maryland, College Park · <sup>2</sup>Dept. of Chemistry and Biochemistry, University of Notre Dame · <sup>3</sup>Dept. of Computer Science, University of Maryland, College Park<br><sup>†</sup>Equal contribution · <sup>\*</sup>Corresponding authors</sub>
 
-[**Paper**](#) · [**Models**](https://huggingface.co/Ziyao1010/LIMBER) · [**Quick start**](#quick-start) · [**Results**](#results) · [**Reproduce**](#reproducing-the-paper)
+[**Paper**](#) · [**Models**](https://huggingface.co/Ziyao1010/LIMBER) · [**Quick start**](#quick-start) · [**Results**](#results) · [**Zero-shot framework**](#what-pretraining-alone-produces) · [**Scaling**](#scaling-behaviour) · [**Reproduce**](#reproducing-the-paper)
 
 </div>
 
@@ -54,6 +54,11 @@ pure-Mamba models** trained under identical settings — every one of them relea
   ahead of RiNALMo-giga, AIDO.RNA-650M, structRFM and RNA-FM fine-tuned under an identical protocol.
 - **Near-ceiling ncRNA classification.** **99.2%** accuracy on the 13-class nRC benchmark, with
   the best AUROC, AUPRC, MCC and F1 of every model tested.
+- **A zero-shot framework that needs no labels at all.** Four probes read structure, evolutionary
+  relatedness and mutational fitness straight out of a pretrained model — no fine-tuning, no
+  auxiliary probe to train. Categorical-Jacobian contact maps pulled directly from LIMBER-macro
+  reach **0.870 normalized AUPR on CRW and 0.857 on tRNAdb** without ever seeing a labelled
+  structure, and beat the RNAstructure and ViennaRNA thermodynamic predictors on most datasets.
 - **Intermediate layers are enough.** A LIMBER-macro truncated to its first 14 layers — about 43%
   of the parameters — still classifies at **98.4%**, outperforming RiNALMo-giga at a fraction of
   the cost. The task-agnostic framework predicted this before any fine-tuning was run.
@@ -63,9 +68,12 @@ pure-Mamba models** trained under identical settings — every one of them relea
 - **A controlled architecture comparison.** Pure-Transformer and pure-Mamba models at 100M, 300M
   and 650M parameters, trained on the same data with the same optimizer, isolate what the hybrid
   design actually contributes.
-- **Scaling laws that differ by capability.** Structural recovery, family discrimination and
-  fitness prediction scale differently with model size, data and compute — model capacity is the
-  strongest single lever in the regimes we studied.
+- **Scaling laws that differ by capability.** With data, optimizer and corpus held fixed across
+  every variant, the three axes separate cleanly. Model capacity is the strongest lever
+  (zero-shot structure recovery **0.301 → 0.646** from 10M to 650M); data saturates around half
+  the corpus; doubling compute buys the least. Fitness prediction keeps climbing with size while
+  RNA-type discrimination moves the *other* way — capabilities scale non-uniformly and appear to
+  compete for shared capacity.
 - **Fully open.** Every checkpoint, every probe, every downstream pipeline.
 
 ## Results
@@ -151,14 +159,107 @@ outperforms RNA-FM, structRFM and SMRTnet's own RNASwan-seq encoder. On the 2,01
 external benchmark, scored by sliding-window ensembling without prior knowledge of the binding
 pocket, both LIMBER variants hold up across accuracy, precision, recall, AUROC and AUPRC.
 
-### Zero-shot, no fine-tuning at all
+## What pretraining alone produces
 
-Across **26,707 bpRNA-1m(90) sequences**, categorical-Jacobian contact maps read straight out of
-LIMBER-macro recover secondary structure better than RNA-FM, structRFM, RNAErnie and the LucaOne
-family across nearly every RNA category, and beat the RNAstructure and ViennaRNA thermodynamic
-predictors in most. On **33 deep mutational scanning assays** from RNAGym (862,376 variants),
-wild-type-conditioned log-likelihood ratios from LIMBER-macro give the leading overall Spearman
-correlation, with a clear margin on ribozymes.
+Downstream scores are a blunt instrument for judging a foundation model: they confound what the
+encoder knows with how well a task head was tuned on a small labelled set. So we built a
+**unified, task-agnostic framework** that interrogates a pretrained model directly — no labels,
+no fine-tuning, no auxiliary probe to train. Four complementary views, across structure,
+evolution and function.
+
+| Probe | Question it answers | Script |
+|---|---|---|
+| **Categorical Jacobian** | Can the output logits' sensitivity to every single-nucleotide substitution reconstruct the native contact map? An end-to-end, full-network read, unlike attention-head picking | `scripts/jacobian_ss_eval.py`, `scripts/extract_contacts_categorical_jacobian.py` |
+| **Embedding perturbation** | Where in the stack does that structural signal live? Same substitutions, but measured in each layer's hidden states — one contact map per layer | `scripts/extract_contacts_embedding_perturb.py` |
+| **Spectral family probe** | Do the representations separate homologous from non-homologous sequence pairs? FFT spectral features per layer, scored by distribution overlap | `scripts/extract_family_cls_full.py`, `scripts/nrc_zeroshot.py` |
+| **Likelihood-ratio fitness** | Do wild-type-conditioned log-likelihood ratios track measured mutational effects? One forward pass per wild type | `scripts/make_fig_fitness_landscape.py` |
+| **Layer ablation** | Which layers actually matter? Perplexity, contact recovery and fitness correlation with one layer removed, or the encoder truncated | `scripts/layer_importance.py` |
+
+### Secondary structure, read straight out of the model
+
+Categorical-Jacobian contact maps extracted from LIMBER-macro with no fine-tuning whatsoever,
+scored by normalized AUPR (1 = perfect, 0 = random) across the seven source datasets of
+bpRNA-1m(90):
+
+| Source | CRW | tRNAdb | RNP | tmRNA | SRP | RFAM | PDB | macro mean |
+|---|---|---|---|---|---|---|---|---|
+| *n* | 3,300 | 207 | 253 | 339 | 348 | 1,000 | 329 | 5,776 |
+| **Normalized AUPR** | **0.870** | **0.857** | **0.741** | **0.675** | **0.625** | **0.460** | **0.294** | **0.646** |
+
+Over the full **26,707-sequence** benchmark, LIMBER-macro beats RNA-FM, structRFM, RNAErnie and
+the LucaOne family in nearly every RNA category, beats the RNAstructure and ViennaRNA
+thermodynamic predictors in most, and is competitive with RiNALMo-giga and the AIDO family. At
+matched scale LIMBER-nano generally outperforms RiNALMo-mega. No model saw a single labelled
+structure.
+
+### Evolutionary and functional signal
+
+On **33 deep mutational scanning assays** from RNAGym — 862,376 variants spanning aptamer–protein
+binding, ribozyme self-cleavage, self-aminoacylation, template-directed polymerization, tRNA
+growth and suppressor activity, and pre-mRNA splicing — wild-type-conditioned log-likelihood
+ratios from LIMBER-macro give the leading overall Spearman correlation, with a clear margin on
+ribozymes. On family discrimination over Rfam 15.1 seed alignments and ArchiveII (100,000
+homologous and 100,000 non-homologous pairs each), LIMBER variants achieve the best family-level
+separation of every RNA language model tested.
+
+### Information is organized hierarchically, not monotonically
+
+Layer ablation and embedding perturbation together show that **deeper is not uniformly better**.
+Structural information accumulates in the final two or three layers, and ablating the Mamba
+layers near the start and end of the encoder damages contact recovery and fitness correlation the
+most. Yet the middle layers that contribute least to structure carry the *sharpest* discrimination
+between RNA families. Which layer is most useful depends on the biological question — and that is
+a practical result, not just an interpretability one: it is what led us to truncate LIMBER-macro
+to its first 14 layers for classification and keep 98.4% accuracy at ~43% of the parameters.
+
+## Scaling behaviour
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/limber_scaling_dark.png">
+  <img src="assets/limber_scaling_light.png" alt="LIMBER scaling behaviour across model size, data and compute" width="100%">
+</picture>
+
+Because every variant was pretrained by us on the same corpus with the same optimizer, the three
+scaling axes can be separated cleanly — something published RLM comparisons cannot do, since they
+differ in parameters, data and budget all at once.
+
+**Model capacity is the strongest lever.** Across 10M → 650M parameters at fixed data and budget,
+perplexity, zero-shot structure recovery, family discrimination and fitness prediction all improve
+broadly monotonically. Structure recovery rises steeply through the small and intermediate scales,
+then flattens:
+
+| Parameters | 10.2M | 49.3M | 91.7M | 303.6M | 664.3M |
+|---|---|---|---|---|---|
+| Zero-shot structure (norm. AUPR) | 0.301 | 0.429 | 0.590 | 0.642 | 0.646 |
+| Validation perplexity | 1.604 | 1.497 | 1.434 | 1.398 | 1.377 |
+
+**Data helps most up to about half the corpus.** Pretraining LIMBER-nano on 20/40/60/80/100% of
+the 40.5M sequences, the largest gains land early; beyond ~50% the additional benefit concentrates
+in longer RNAs:
+
+| Corpus fraction | 20% | 40% | 60% | 80% | 100% |
+|---|---|---|---|---|---|
+| Validation perplexity | 1.563 | 1.498 | 1.467 | 1.447 | 1.434 |
+
+**More compute buys the least.** Doubling the training budget from 6 to 12 epochs leaves
+classification and fitness prediction largely unchanged; only structure recovery shows a modest
+dependence, tracking the continued decline in perplexity:
+
+| Epochs | 3 | 6 | 9 | 12 |
+|---|---|---|---|---|
+| Validation perplexity | 1.399 | 1.375 | 1.365 | 1.358 |
+
+**Capabilities scale differently, and partly compete.** Perplexity, structural recovery and
+family discrimination improve sharply from small to intermediate scales and then taper, while
+fitness prediction keeps improving steadily with size. RNA-*type* discrimination runs the other
+way — it gets *worse* as models grow, even as family-level separation and coevolutionary signal
+improve. Distinct biological representations appear to scale non-uniformly and to compete for
+shared capacity. The same size-dependent trends hold for the pure-Transformer models and for the
+RiNALMo and AIDO families, so this is a property of RNA language models, not of LIMBER.
+
+The practical upshot: under a fixed budget, **spend it on capacity** rather than on more epochs or
+a bigger corpus, once data and training reach moderate scale — and invest in sequence diversity
+rather than raw corpus size.
 
 ## Model zoo
 
@@ -251,23 +352,6 @@ negative log-likelihood over masked positions only, on a fixed 4,096-sequence va
 with masks drawn from a fixed seed, so every model is scored at identical positions
 (`scripts/baseline_ppl_only.py`, `scripts/layer_importance.py`).
 
-## Task-agnostic evaluation and interpretation
-
-These probes need no labels and no fine-tuning, so they measure what pretraining itself produced.
-
-| Probe | What it measures | Script |
-|---|---|---|
-| Categorical Jacobian | Secondary-structure contacts from the sensitivity of output logits to every single-nucleotide substitution, scored by normalized AUPR | `scripts/jacobian_ss_eval.py`, `scripts/extract_contacts_categorical_jacobian.py` |
-| Embedding perturbation | The same contacts from layer-wise hidden-state responses, giving one contact map per layer | `scripts/extract_contacts_embedding_perturb.py` |
-| Family / type classification | Overlap between similarity distributions of homologous and non-homologous pairs, in FFT spectral features of each layer | `scripts/extract_family_cls_full.py`, `scripts/nrc_zeroshot.py` |
-| Zero-shot fitness | Spearman correlation between measured mutational effects and wild-type-conditioned log-likelihood ratios | `scripts/make_fig_fitness_landscape.py` |
-| Layer importance | Change in perplexity, contact recovery and fitness correlation when a single layer is ablated or the encoder is truncated | `scripts/layer_importance.py` |
-
-What they show: structural information concentrates in the last two or three layers, while the
-seemingly quiet middle layers carry the sharpest discrimination between RNA families — a
-hierarchical, non-monotonic organization in which the most useful layer depends on the biological
-question. That finding is what motivated the 14-layer truncation in the classification table above.
-
 ## Reproducing the paper
 
 | Task | Data | Entry point |
@@ -277,7 +361,6 @@ question. That finding is what motivated the 14-layer truncation in the classifi
 | ncRNA classification | nRC, 13 classes | `scripts/nrc_finetune.py` |
 | IRES identification | DeepIRES benchmark | `scripts/downstream_finetune.py --task ires` |
 | Mean ribosome load | 5′UTR MPRA library | `scripts/downstream_finetune.py --task mrl` |
-| Tertiary structure | trRosettaRNA / Zfold on CASP15-natural, CASP16, RNA-Puzzles | `rna3d/` |
 | README figures | — | `scripts/make_readme_figures.py` |
 
 Secondary-structure fine-tuning follows RiNALMo's published protocol: a residual convolutional
@@ -306,7 +389,6 @@ exactly on all 600 benchmark files.
 ```
 models/              HybridMambaForMaskedLM — all three architectures
 scripts/             pretraining, evaluation probes, downstream pipelines, figures
-rna3d/               tertiary-structure drivers and scoring
 tokenizers/single/   single-nucleotide vocabulary
 assets/              README figures
 data/                small metadata only

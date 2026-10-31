@@ -162,11 +162,57 @@ benchmark, ahead of the task-specific DeepIRES.
 surpasses RiNALMo-giga and AIDO.RNA-650M, and LIMBER-nano outperforms RNA-FM, structRFM and
 SMRTnet's own RNASwan-seq encoder.
 
-**Zero-shot, no fine-tuning** — across 26,707 bpRNA-1m(90) sequences, categorical-Jacobian contact
-maps read straight out of LIMBER-macro recover secondary structure better than RNA-FM, structRFM,
-RNAErnie and the LucaOne family across nearly every RNA category, and beat RNAstructure and
-ViennaRNA in most. On 33 deep mutational scanning assays from RNAGym (862,376 variants),
-wild-type-conditioned log-likelihood ratios give the leading overall Spearman correlation.
+## What pretraining alone produces
+
+Downstream scores confound what an encoder knows with how well a task head was tuned. So the
+paper also introduces a **task-agnostic framework** that interrogates a pretrained model
+directly — no labels, no fine-tuning, no auxiliary probe to train: the **categorical Jacobian**
+(contact maps from output-logit sensitivity to every single-nucleotide substitution),
+**embedding perturbation** (the same signal, per layer), a **spectral family probe** (homologous
+vs non-homologous pair separation in FFT features) and **likelihood-ratio fitness**.
+
+Contact maps extracted from LIMBER-macro with no fine-tuning whatsoever, normalized AUPR across
+the seven source datasets of bpRNA-1m(90):
+
+| Source | CRW | tRNAdb | RNP | tmRNA | SRP | RFAM | PDB | macro mean |
+|---|---|---|---|---|---|---|---|---|
+| *n* | 3,300 | 207 | 253 | 339 | 348 | 1,000 | 329 | 5,776 |
+| **Normalized AUPR** | **0.870** | **0.857** | **0.741** | **0.675** | **0.625** | **0.460** | **0.294** | **0.646** |
+
+Over the full 26,707-sequence benchmark LIMBER-macro beats RNA-FM, structRFM, RNAErnie and the
+LucaOne family in nearly every category, and beats the RNAstructure and ViennaRNA thermodynamic
+predictors in most. On 33 deep mutational scanning assays from RNAGym (862,376 variants),
+wild-type-conditioned log-likelihood ratios give the leading overall Spearman correlation, with a
+clear margin on ribozymes.
+
+The layer-wise view shows that **deeper is not uniformly better**: structural information
+concentrates in the last two or three layers, while the middle layers that contribute least to
+structure carry the sharpest discrimination between RNA families. That is what led to the
+14-layer truncation above.
+
+## Scaling behaviour
+
+<img src="https://raw.githubusercontent.com/ziyaow1010/LIMBER/main/assets/limber_scaling_light.png" alt="LIMBER scaling behaviour" width="100%">
+
+Every variant in this repo was pretrained on the same corpus with the same optimizer, so the
+three scaling axes separate cleanly.
+
+**Model capacity is the strongest lever** — 10M → 650M at fixed data and budget:
+
+| Parameters | 10.2M | 49.3M | 91.7M | 303.6M | 664.3M |
+|---|---|---|---|---|---|
+| Zero-shot structure (norm. AUPR) | 0.301 | 0.429 | 0.590 | 0.642 | 0.646 |
+| Validation perplexity | 1.604 | 1.497 | 1.434 | 1.398 | 1.377 |
+
+**Data saturates around half the corpus** — LIMBER-nano on 20/40/60/80/100% of 40.5M sequences:
+perplexity 1.563 / 1.498 / 1.467 / 1.447 / 1.434.
+
+**Compute buys the least** — LIMBER-macro at 3/6/9/12 epochs: perplexity 1.399 / 1.375 / 1.365 /
+1.358, with classification and fitness prediction largely unchanged.
+
+Capabilities scale non-uniformly: fitness prediction keeps improving steadily with size while
+RNA-*type* discrimination moves the other way, suggesting distinct biological representations
+compete for shared capacity.
 
 ## Training details
 
