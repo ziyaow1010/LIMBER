@@ -11,11 +11,15 @@ Outputs (in DATA_DIR):
   epoch_seqs_80pct/  -- folds 0+1+2+3
 """
 
+import hashlib
 import json
 import os
 import sys
 from collections import defaultdict
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from rna_stream_dataset import normalize  # same normalisation as the full corpus
 
 FASTA   = Path("/beacon-projects/rnallm/data/rnacentral/rnacentral_active.fasta")
 VAL_TXT = Path("/beacon-projects/rnallm/data/rnacentral/epoch_seqs_full/val.txt")
@@ -27,7 +31,9 @@ N_FOLDS = 5
 N_EPOCHS = 12  # same as full
 
 def urs_fold(urs_id: str) -> int:
-    return hash(urs_id) % N_FOLDS
+    # md5, not the builtin hash(): string hashing is salted per process unless
+    # PYTHONHASHSEED is fixed, so builtin hash() gives different folds on a rerun.
+    return int(hashlib.md5(urs_id.encode()).hexdigest(), 16) % N_FOLDS
 
 def fold_included(fold: int, frac_idx: int) -> bool:
     n_include = frac_idx + 1  # frac 0 -> 1 fold, frac 1 -> 2 folds, etc.
@@ -43,20 +49,29 @@ def main():
         out_dirs.append(d)
         out_files.append(open(d / "train.txt", "w"))
 
+    # the held-out validation sequences must never reach a training subset
+    val_seqs = {l.strip() for l in open(VAL_TXT) if l.strip()}
+    print(f"Loaded {len(val_seqs):,} held-out validation sequences to exclude")
+
     cat_counts  = defaultdict(int)
     fold_counts = defaultdict(lambda: [0]*N_FOLDS)
     subset_counts = [0] * len(FRACS)
+    n_val_skipped = 0
 
     header = None
     seq_parts = []
     n_total = 0
 
     def flush(header, seq_parts):
-        nonlocal n_total
+        nonlocal n_total, n_val_skipped
         parts = header.split()
         urs_id   = parts[0][1:]          # strip '>'
         category = parts[1] if len(parts) > 1 else "unknown"
-        seq_rna  = "".join(seq_parts).replace("T", "U")
+        seq_rna  = normalize("".join(seq_parts))
+
+        if seq_rna in val_seqs:
+            n_val_skipped += 1
+            return
 
         fold = urs_fold(urs_id)
         cat_counts[category] += 1
@@ -89,6 +104,7 @@ def main():
         f.close()
 
     print(f"\nTotal sequences processed: {n_total:,}")
+    print(f"Validation sequences excluded from every subset: {n_val_skipped:,}")
     print(f"Subset sizes: {dict(zip(NAMES, subset_counts))}")
 
     # Print category distribution sanity check
